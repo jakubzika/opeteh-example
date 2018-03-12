@@ -1,0 +1,634 @@
+import _, { concat, filter, forEach, mapValues, pickBy } from 'lodash';
+
+class SignallingService {
+  constructor(url, isServer) {
+
+    this.connection = new WebSocket(url);
+    this.state = 'connecting';
+    this.id = null;
+    this.isServer = isServer;
+
+    this.connection.onopen = this.onOpen.bind(this);
+    this.connection.onmessage = this.onMessage.bind(this);
+    this.connection.onclose = this.onClose.bind(this);
+
+    window.addEventListener('beforeunload', function () {
+      this.connection.close();
+    }.bind(this));
+  }
+
+  onOpen() {
+    this.state = 'connected';
+    if(this.isServer) {
+      this.send('info', {
+        type: 'SERVER'
+      });
+      this.message('session')
+        .then((message) => {
+          this.room = message.data.room;
+        });
+    } else {
+      this.send('info', {
+        type: 'CLIENT',
+      });
+      this.message('session')
+        .then((message) => {
+          console.log('[session] -',message);
+        });
+    }
+
+    this.message('info')
+      .then((message) => {
+        this.id = message.data.id;
+        if (this.isServer && message.data.room) {
+          this.room = message.data.room;
+        }
+      });
+  }
+
+  onMessage(evt) {
+    console.log('[message] - ', JSON.parse(evt.data).type);
+  }
+
+  async isConnected() {
+    if(!this.id) {
+      await this.message('info');
+    }
+  }
+
+  onClose(event) {
+    this.state = 'closed';
+  }
+
+  async start(room) {
+    if (this.isServer) {
+      this.send('session', {});
+      const message = await this.message('session');
+      this.room = message.data.room;
+      this.id = message.data.id;
+    } else {
+      this.room = room;
+      this.send('session', {
+        room: room,
+      });
+      const message = await this.message('session');
+
+    }
+  }
+
+  message(type, from) {
+    return new Promise((resolve, reject) => {
+      let evtListener = this.connection.addEventListener('message',(evt) => {
+        let message = JSON.parse(evt.data);
+        if(message.type === type && (message.from === from || from === undefined) ) {
+          this.connection.removeEventListener('message',evtListener);
+          resolve(JSON.parse(evt.data));
+        }
+      });
+    });
+  }
+
+  send(type, data, to, additionalData) {
+    if(!additionalData) {
+      additionalData = {};
+    }
+    const dataToSend = {
+      type,
+      data,
+      to,
+    };
+    _.forEach(additionalData, (value, key) => {
+      dataToSend[key] = value;
+    });
+
+    this.connection.send(JSON.stringify(dataToSend));
+  }
+}
+
+const resolvePromises = (promises, type, data) => {
+  let newPromises = Object.assign({}, promises);
+  newPromises[type] = filter(promises[type], (promise) => {
+    promise.resolve(data);
+    return true;
+  });
+  return newPromises;
+};
+
+
+
+const addPromise = (promises, type, resolve, reject) => {
+  let newPromises = Object.assign({}, promises);
+  newPromises[type] = concat(promises[type] || [], { resolve, reject });
+  return newPromises;
+};
+
+const STATUS = {
+  CONNECTED: 'CONNECTED',
+  DISCONNECTED: 'DISCONNECTED',
+  CONNECTING: 'CONNECTING',
+};
+
+const TYPE = {
+  SERVER: 'SERVER',
+  CLIENT: 'CLIENT',
+  BROADCAST: 'BROADCAST',
+};
+
+
+
+const MESSAGE_TYPES = {
+  NEW_CONNECTION: 'NEW_CONNECTION',
+  CLIENT_DISCONNECTED: 'CLIENT_DISCONNECTED',
+  NEW_CLIENT: '',
+  DATA: 'DATA',
+  OPEN: 'OPEN',
+  CLIENT_INFO: 'CLIENT_INFO',
+  NETWORK_INFO: 'NETWORK_INFO',
+};
+
+class Client {
+  constructor(signallingServerURL, iceServers) {
+    this.iceServers = iceServers;
+
+    this.signalling = new SignallingService(signallingServerURL, false);
+
+    this.sendChannelOpen = false;
+    this.receiveChannelOpen = false;
+    this.connected = false;
+
+    this.promises = {
+      connected: [],
+      newClient: [],
+      message:[],
+    };
+
+    this.clients = {};
+  }
+
+  addPromise(type) {
+    return new Promise((resolve, reject) => {
+      this.promises = addPromise(this.promises, type, resolve, reject);
+    })
+  }
+
+  addClientPromise(clientId, type) {
+    if (this.clients[clientId]) {
+      return new Promise((resolve, reject) => {
+        this.clients[clientId].promises = addPromise(this.clients[clientId].promises, type, resolve, reject);
+      })
+    } else {
+      return Promise.reject('')
+    }
+  }
+
+  resolvePromises(type, data) {
+    this.promises = resolvePromises(this.promises, type, data);
+  }
+
+  resolveClientPromise(clientId, type, data) {
+    this.clients[clientId].promises = this.resolvePromises(this.clients[clientId].promises, type, data);
+  }
+
+  connection() {
+    if(!this.connected) {
+      return this.addPromise('connected')
+    } else {
+      return Promise.resolve(true);
+    }
+  }
+
+  onIceCandidate(evt) {
+    if(evt.candidate) {
+      this.signalling.send('ice', evt.candidate, );
+    }
+  }
+
+  async onIncomingIceCandidate() {
+    const message = await this.signalling.message('ice');
+    console.log('new ice candidate');
+    this.peerConnection.addIceCandidate(message.data);
+  }
+
+  onSendChannelOpen() {
+    console.log('sendChannel open');
+    this.sendChannelOpen = true;
+    if (this.receiveChannelOpen && !this.connected) {
+      this.connected = true;
+      console.log(this.sendChannel.readyState);
+      this.resolvePromises('connected', true);
+    }
+  }
+
+  onReceiveChannelOpen() {
+    console.log('receiveChannel open');
+    this.receiveChannelOpen = true;
+    if (this.sendChannelOpen && !this.connected) {
+      this.connected = true;
+      this.resolvePromises('connected', true);
+    }
+  }
+
+  onDataChannel(evt) {
+    let receiveChannel = evt.channel;
+    receiveChannel.onmessage = this.onMessage.bind(this);
+    receiveChannel.onopen = this.onReceiveChannelOpen.bind(this);
+    this.receiveChannel = receiveChannel;
+  }
+
+  onMessage(evt) {
+    const message = JSON.parse(evt.data);
+    console.log(message);
+    this.resolvePromises('message', message);
+    this.resolvePromises(message.type, message);
+    if (this.clients[message.from]) {
+      this.resolveClientPromise(message.from, 'message', message);
+      this.resolveClientPromise(message.from, message.type, message);
+    }
+
+    switch(message.type) {
+      case MESSAGE_TYPES.NETWORK_INFO:
+        this.clients = message.data.clients;
+        break;
+      case MESSAGE_TYPES.CLIENT_INFO:
+        this.clients[message.from].info = message.data;
+        break;
+      case MESSAGE_TYPES.DATA:
+        break;
+      case MESSAGE_TYPES.NEW_CONNECTION:
+        this.clients[message.data.id] = {
+          info: undefined,
+          promises: {},
+        };
+        break;
+    }
+    document.getElementById('clients').innerHTML = JSON.stringify(this.clients, false, 2);        
+  }
+
+  addEventListeners() {
+    this.peerConnection.onicecandidate = this.onIceCandidate.bind(this);
+    this.peerConnection.ondatachannel = this.onDataChannel.bind(this);
+    this.sendChannel.onopen = this.onSendChannelOpen.bind(this);
+    this.onIncomingIceCandidate();
+  }
+
+  async connect(room, info) {
+    this.info = info;
+    await this.signalling.isConnected();
+    await this.signalling.start(room, info);
+
+    this.id = this.signalling.id;
+
+    this.peerConnection = new RTCPeerConnection(this.iceServers);
+    this.sendChannel = this.peerConnection.createDataChannel('clientSendChannel');
+
+    this.addEventListeners();
+
+    const offer = await this.peerConnection.createOffer();
+    await this.peerConnection.setLocalDescription(offer);
+    this.signalling.send('request', offer);
+
+    const response = await this.signalling.message('response');
+    await this.peerConnection.setRemoteDescription(response.data);
+    console.log('waiting for connection promise');    
+    await this.connection();
+    console.log('got connection');
+    this.send(MESSAGE_TYPES.CLIENT_INFO, info, TYPE.BROADCAST);
+    console.log('sent info message');
+    let message = await this.receive(TYPE.NETWORK_INFO);
+    this.clients = message.data.clients;
+
+  }
+
+  send(type, data, to) {
+    const message = {
+      type,
+      data,
+      to,
+    };
+    this.sendChannel.send(JSON.stringify(message));
+  }
+
+  close() {
+    this.peerConnection.close();
+    this.sendChannel.close();
+    this.receiveChannel.close();
+  }
+
+  receive(type = 'message', from) {
+    if (from) {
+        return this.addClientPromise(from, type);
+    }
+    else {
+        return this.addPromise(type);
+    }
+  }
+}
+
+function log(type, message, data) {
+  console.log(`[${type}] - ${message}`, data);
+}
+
+class Server {
+  constructor(signallingServerURL, iceServers, maxConnections) {
+    this.maxConnections = maxConnections;
+    this.iceServers = iceServers;
+
+    this.signalling = new SignallingService(signallingServerURL, true);
+    this.clients = {};
+    this.onopen = undefined;
+
+    this.onSendChannelOpen = this.onSendChannelOpen.bind(this);
+    this.onReceiveChannelOpen = this.onReceiveChannelOpen.bind(this);
+    this.onIceCandidate = this.onIceCandidate.bind(this);
+    this.onMessage = this.onMessage.bind(this);
+    this.onDataChannel = this.onDataChannel.bind(this);
+
+    this.promises = {
+      initialization: [],
+      newClient: [],
+    };
+  }
+
+  // promise events
+  addPromise(type) {
+    return new Promise((resolve, reject) => {
+      this.promises = addPromise(this.promises, type, resolve, reject);
+    })
+  }
+
+  addClientPromise(clientId, type) {
+    return new Promise((resolve, reject) => {
+      this.clients[clientId].promises = addPromise(this.clients[clientId].promises, type, resolve, reject);
+    })
+  }
+
+
+  resolveClientPromise(clientId, type, data) {
+    console.log('resolveClientPromise(clientId, type, data) {', clientId, type, data);
+    this.clients[clientId].promises = resolvePromises(this.clients[clientId].promises, type, data);
+  }
+
+  initialization() {
+    if (!this.room) {
+      return this.addPromise('initialization')
+    }
+  }
+
+  newClient() {
+    return this.addPromise('newClient')
+  }
+
+  message(id, type) {
+    console.log('message(id, type) {',id, type);
+    return this.addClientPromise(id, type)
+  }
+  //
+
+  get activeClients() {
+    let numOfActiveClients = 0;
+    forEach(this.clients, (client) => {
+      if (client.state !== STATUS.DISCONNECTED) {
+        numOfActiveClients++;
+      }
+    });
+    return numOfActiveClients;
+  }
+
+  get clientsInfo() {
+    return mapValues(this.clients, (client, clientId) => {
+      return {
+        info: client.info,
+      }
+    })
+  }
+
+  onSendChannelOpen(clientId) {
+    return (evt) => {
+      log('send channel', 'send channel open');
+      this.clients[clientId].sendChannelOpen = true;
+      if (this.clients[clientId].receiveChannelOpen && !this.clients[clientId].connected) {
+        this.clients[clientId].connected = true;
+        this.promises = resolvePromises(this.promises, 'newClient', clientId);
+      }
+    }
+  }
+
+  onReceiveChannelOpen(clientId) {
+    return (evt) => {
+      log('receive channel', 'receive channel open');
+      this.clients[clientId].receiveChannelOpen = true;
+      if (this.clients[clientId].receiveChannelOpen && !this.clients[clientId].connected) {
+        this.clients[clientId].connected = true;
+        this.promises = resolvePromises(this.promises, 'newClient', clientId);
+      }
+    }
+  }
+
+  onIceCandidate(clientId) {
+    return (evt) => {
+      if (evt.candidate) {
+        log('ice', 'got ice candidate', evt.candidate);
+        this.signalling.send('ice', evt.candidate, clientId);
+      }
+    }
+  }
+
+  async onIncomingIceCandidate(clientId) {
+    log('ice', 'starting to expect ice candidate message');
+    let message = await this.signalling.message('ice');
+    log('ice', 'received ice candidate from client', message.data);
+    console.log('received ice candidate but it does not really matter');
+    this.clients[clientId].peerConnection.addIceCandidate(message.data);
+  }
+
+  processMessage(message, clientId) {
+    console.log('message to SERVER', message);
+    this.resolveClientPromise(clientId, message.type, message.data);
+
+    switch (message.type) {
+      case MESSAGE_TYPES.OPEN:
+        break;
+      case MESSAGE_TYPES.DATA:
+        break;
+      case MESSAGE_TYPES.CLIENT_INFO:
+        this.clients[clientId].info = message.data;
+        document.getElementById('clients').innerHTML = JSON.stringify(this.clients,false, 2);
+        break;
+    }
+  }
+
+  onMessage(clientId) {
+    return (evt) => {
+
+      log('message', 'incoming message from ' + clientId, JSON.parse(evt.data));
+
+
+      const message = JSON.parse(evt.data);
+
+      // Handle to who is message meant to
+      let to = message.to;
+
+      if (typeof(to) === 'string') {
+        if (to === TYPE.SERVER) {
+          this.processMessage(message, clientId);
+        }
+        else if (to === TYPE.BROADCAST) {
+          this.processMessage(message, clientId);
+          this.send(message.type, message.data, to, clientId);
+        } else {
+          this.send(message.type, message.data, to, clientId);
+        }
+      } else if (typeof(to) === 'object') {
+        if (to.includes(TYPE.SERVER)) {
+          this.processMessage(message, clientId);
+          this.send(message.type, message.data, to, clientId);
+        } else {
+          this.send(message.type, message.data, to, clientId);
+        }
+      }
+    };
+  }
+
+  onDataChannel(clientId) {
+    return (evt) => {
+      log('data channel', 'new data channel', evt.channel);
+      let receiveChannel = evt.channel;
+      receiveChannel.onmessage = this.onMessage(clientId);
+      receiveChannel.onopen = this.onReceiveChannelOpen(clientId);
+
+      this.clients[clientId].receiveChannel = receiveChannel;
+      window.receiveChannel = receiveChannel;
+    }
+  }
+
+  addEventListeners(clientId) {
+    log('event listener', 'adding event listeners');
+    this.onIncomingIceCandidate(clientId)
+      .then(() => {
+        console.log('done');
+      });
+    this.clients[clientId].peerConnection.onicecandidate = this.onIceCandidate(clientId);
+    this.clients[clientId].peerConnection.ondatachannel = this.onDataChannel(clientId);
+    this.clients[clientId].sendChannel.onopen = this.onSendChannelOpen(clientId);
+  }
+
+  close(clientId) {
+    this.clients[clientId].peerConnection.close();
+    this.clients[clientId].receiveChannel.close();
+    this.clients[clientId].sendChannel.close();
+  }
+
+  async listen() {
+    await this.signalling.isConnected();
+    await this.signalling.start();
+
+    this.room = this.signalling.room;
+    this.id = this.signalling.id;
+
+    resolvePromises(this.promises, 'initialization', this.room);
+    while (this.activeClients < this.maxConnections) {
+      log('initialization', 'waiting for initial request message');
+      const initialMessage = await this.signalling.message('request');
+      log('initialization', 'got initialization message', initialMessage);
+      const client = {
+        promises: {
+          message: [],
+        },
+        info: undefined,
+      };
+      const id = initialMessage.from;
+      this.clients[id] = client;
+
+      // client.sendChannelConnected = false;
+      // client.receiveChannelConnected = false;
+
+
+
+      client.peerConnection = new RTCPeerConnection(this.iceServers);
+      log('peer connection', 'created RTCPeerConnection');
+      client.sendChannel = client.peerConnection.createDataChannel('sendChannel');
+      log('peer connection', 'created sendChannel');
+      this.addEventListeners(id);
+      log('event listener', 'added event listeners');
+      await client.peerConnection.setRemoteDescription(initialMessage.data);
+      log('peer connection', 'set remote description');
+      const answer = await client.peerConnection.createAnswer();
+      log('peer connection', 'created answer');
+      await client.peerConnection.setLocalDescription(answer);
+      log('peer connection', 'set localDescription');
+      this.signalling.send('response', answer, id);
+      log('peer connection', 'sent response');
+
+
+      this.message(id, TYPE.CLIENT_INFO)
+        .then((infoMessage) => {
+          console.log('received info message');
+          this.clients[id].info = infoMessage.data;
+          // TODO add resolve promise to let know that user is ready
+        });
+      await this.newClient();
+      
+      this.send(MESSAGE_TYPES.NETWORK_INFO, {
+        clients: pickBy(this.clientsInfo, (client, clientId) => {
+          return clientId !== id;
+        }),
+      }, id);
+
+      this.send(MESSAGE_TYPES.NEW_CONNECTION, {
+        id,
+      }, TYPE.BROADCAST, id);
+    }
+  }
+
+
+  send(type, data, to, from = TYPE.SERVER) {
+    const message = {
+      type,
+      data,
+      from,
+    };
+    const serializedMessage = JSON.stringify(message);
+    if (typeof to === 'object') {
+      forEach(to, (recipient) => {
+        if (recipient !== TYPE.SERVER) {
+          this.clients[recipient].sendChannel.send(serializedMessage);
+        }
+      });
+    } else if (to == TYPE.BROADCAST) {
+      forEach(this.clients, (client, clientId) => {
+        if (from !== clientId) {
+          client.sendChannel.send(serializedMessage);
+        }
+      });
+    }
+    else {
+      this.clients[to].sendChannel.send(serializedMessage);
+    }
+  }
+
+  // message(id, type) {
+  //   type = type || TYPE.DATA;
+  //   return new Promise((resolve, reject) => {
+  //     const evtListener = this.clients[id].receiveChannel.addEventListener('message', (evt) => {
+  //       const message = JSON.parse(evt.data);
+  //       if (message.type === type) {
+  //         resolve(message.data);
+  //         this.clients[id].receiveChannel.removeEventListener('message', evtListener);
+  //       }
+  //     })
+  //   });
+  // }
+}
+
+// if (location.hash === '#s') {
+//   isServer();
+// } else {
+//   isClient();
+// }
+
+var index = {
+  OpetehServer: Server,
+  OpetehClient: Client,
+}
+
+export default index;
