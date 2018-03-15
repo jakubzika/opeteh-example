@@ -1,0 +1,19 @@
+survey:
+  - 
+    type: yes-no
+    title: Is this working ?
+  -
+    type: checkbox
+    title: Which one of theese do you have home ?
+    options:
+      - anxiety
+      - self hatred
+      - father who beats you
+  -
+    type: number
+    title: How many self inflicted scars do you have ?
+    min: 4
+    max: 20
+  -
+    type: input
+    title: How do you call your gf during intercourse ?

@@ -2,10 +2,33 @@ import React, { Component } from 'react';
 import logo from './logo.svg';
 import './App.css';
 
-import Server from './containers/server/Server.js';
-import Client from './containers/client/Client.js';
+import Server from './containers/server/Server.jsx';
+import Client from './containers/client/Client.jsx';
+import Survey from './components/survey/index.jsx';
+import yaml from 'js-yaml';
 
-const signallingServer = 'ws://localhost:8002/';
+const config = yaml.load(`
+survey:
+  - 
+    type: yes-no
+    title: Is this working ?
+  -
+    type: checkbox
+    title: Which one of theese do you have home ?
+    options:
+      - anxiety
+      - self hatred
+      - father who beats you
+  -
+    type: number
+    title: How many self inflicted scars do you have ?
+    min: 4
+    max: 20
+  -
+    type: input
+    title: How do you call your gf during intercourse ?`)
+
+const signallingServer = 'ws://192.168.1.10:8002/';
 const iceServers = {
   iceServers: [
     {
@@ -26,40 +49,44 @@ class App extends Component {
       type: null,
     }
   }
-isServer() {
-  this.setState({
-    ...this.state,
-    type: 'server'
-  })
-}
+  isServer() {
+    this.setState({
+      ...this.state,
+      type: 'server'
+    })
+  }
 
-isClient() {
-  this.setState({
-    ...this.state,
-    type: 'client'
-  })
-}
+  isClient() {
+    this.setState({
+      ...this.state,
+      type: 'client'
+    })
+  }
 
   render() {
     return (
       <div className="App">
         {!this.state.type ?
-        <div>
-          <span>Choose your side</span>
-          <button onClick={this.isServer}>Server</button>  
-          <button onClick={this.isClient}>Client</button>  
-        </div> : null}
-        {this.state.type === 'client' ? 
-        <div>
-          <Client />
-        </div>: null}
-        {this.state.type === 'server' ? 
-        <div>
-          <Server 
-          signallingServer={signallingServer}
-          iceServers={iceServers}
-          />
-        </div>: null}
+          <div>
+            <span>Choose your side</span>
+            <button onClick={this.isServer}>Server</button>
+            <button onClick={this.isClient}>Client</button>
+          </div> : null}
+        {this.state.type === 'client' ?
+          <div>
+            <Client
+              signallingServer={signallingServer}
+              iceServers={iceServers}
+            />
+          </div> : null}
+        {this.state.type === 'server' ?
+          <div>
+            <Server
+              signallingServer={signallingServer}
+              iceServers={iceServers}
+            />
+          </div> : null}
+          {/* <Survey survey={config.survey}/> */}
       </div>
     );
   }

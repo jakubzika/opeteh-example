@@ -159,10 +159,14 @@ class Client {
     this.promises = {
       connected: [],
       newClient: [],
-      message:[],
+      message: [],
     };
 
-    this.clients = {};
+    this.clients = {
+      SERVER: {
+        promises: {},
+      },
+    };
   }
 
   addPromise(type) {
@@ -186,11 +190,11 @@ class Client {
   }
 
   resolveClientPromise(clientId, type, data) {
-    this.clients[clientId].promises = this.resolvePromises(this.clients[clientId].promises, type, data);
+    this.clients[clientId].promises = resolvePromises(this.clients[clientId].promises, type, data);
   }
 
   connection() {
-    if(!this.connected) {
+    if (!this.connected) {
       return this.addPromise('connected')
     } else {
       return Promise.resolve(true);
@@ -198,7 +202,7 @@ class Client {
   }
 
   onIceCandidate(evt) {
-    if(evt.candidate) {
+    if (evt.candidate) {
       this.signalling.send('ice', evt.candidate, );
     }
   }
@@ -237,17 +241,26 @@ class Client {
 
   onMessage(evt) {
     const message = JSON.parse(evt.data);
-    console.log(message);
     this.resolvePromises('message', message);
     this.resolvePromises(message.type, message);
+    if (message.type === MESSAGE_TYPES.DATA && message.customType) {
+      this.resolvePromises(`${message.type}/${message.customType}`, message);
+    }
     if (this.clients[message.from]) {
       this.resolveClientPromise(message.from, 'message', message);
       this.resolveClientPromise(message.from, message.type, message);
+      if (message.type === MESSAGE_TYPES.DATA && message.customType) {
+        this.resolveClientPromise(message.from, `${message.type}/${message.customType}`, message);
+      }
     }
 
-    switch(message.type) {
+    switch (message.type) {
       case MESSAGE_TYPES.NETWORK_INFO:
-        this.clients = message.data.clients;
+        let newClients = mapValues(message.data.clients, (client) => {
+          client.promises = {};
+          return client
+        });
+        this.clients = Object.assign({}, this.clients, newClients);
         break;
       case MESSAGE_TYPES.CLIENT_INFO:
         this.clients[message.from].info = message.data;
@@ -261,7 +274,6 @@ class Client {
         };
         break;
     }
-    document.getElementById('clients').innerHTML = JSON.stringify(this.clients, false, 2);        
   }
 
   addEventListeners() {
@@ -289,23 +301,23 @@ class Client {
 
     const response = await this.signalling.message('response');
     await this.peerConnection.setRemoteDescription(response.data);
-    console.log('waiting for connection promise');    
     await this.connection();
-    console.log('got connection');
-    this.send(MESSAGE_TYPES.CLIENT_INFO, info, TYPE.BROADCAST);
-    console.log('sent info message');
-    let message = await this.receive(TYPE.NETWORK_INFO);
-    this.clients = message.data.clients;
-
+    this._send(MESSAGE_TYPES.CLIENT_INFO, info, TYPE.BROADCAST);
+    await this._receive(TYPE.NETWORK_INFO);
   }
 
-  send(type, data, to) {
+  _send(type, data, to, customType) {
     const message = {
       type,
       data,
       to,
+      customType,
     };
     this.sendChannel.send(JSON.stringify(message));
+  }
+
+  send(data, to, customType) {
+    this._send(MESSAGE_TYPES.DATA, data, to, customType);
   }
 
   close() {
@@ -314,12 +326,20 @@ class Client {
     this.receiveChannel.close();
   }
 
-  receive(type = 'message', from) {
+  _receive(type = 'message', from) {
     if (from) {
-        return this.addClientPromise(from, type);
+      return this.addClientPromise(from, type);
     }
     else {
-        return this.addPromise(type);
+      return this.addPromise(type);
+    }
+  }
+
+  receive(from, customType) {
+    if (customType) {
+      return this._receive(`${MESSAGE_TYPES.DATA}/${customType}`, from)
+    } else {
+      return this._receive(MESSAGE_TYPES.DATA, from)
     }
   }
 }
@@ -364,8 +384,11 @@ class Server {
 
 
   resolveClientPromise(clientId, type, data) {
-    console.log('resolveClientPromise(clientId, type, data) {', clientId, type, data);
     this.clients[clientId].promises = resolvePromises(this.clients[clientId].promises, type, data);
+  }
+
+  resolvePromises(type, data) {
+    this.promises = resolvePromises(this.promises, type, data);
   }
 
   initialization() {
@@ -378,9 +401,8 @@ class Server {
     return this.addPromise('newClient')
   }
 
-  message(id, type) {
-    console.log('message(id, type) {',id, type);
-    return this.addClientPromise(id, type)
+  clientInfo(from) {
+    return this._receive(from, MESSAGE_TYPES.CLIENT_INFO)
   }
   //
 
@@ -408,7 +430,7 @@ class Server {
       this.clients[clientId].sendChannelOpen = true;
       if (this.clients[clientId].receiveChannelOpen && !this.clients[clientId].connected) {
         this.clients[clientId].connected = true;
-        this.promises = resolvePromises(this.promises, 'newClient', clientId);
+        this.resolvePromises('newClient', clientId);
       }
     }
   }
@@ -419,7 +441,7 @@ class Server {
       this.clients[clientId].receiveChannelOpen = true;
       if (this.clients[clientId].receiveChannelOpen && !this.clients[clientId].connected) {
         this.clients[clientId].connected = true;
-        this.promises = resolvePromises(this.promises, 'newClient', clientId);
+        this.resolvePromises('newClient', clientId);
       }
     }
   }
@@ -442,8 +464,19 @@ class Server {
   }
 
   processMessage(message, clientId) {
-    console.log('message to SERVER', message);
-    this.resolveClientPromise(clientId, message.type, message.data);
+    message.from = clientId;
+    this.resolvePromises('message', message);
+    this.resolvePromises(message.type, message);
+    if (message.type === MESSAGE_TYPES.DATA && message.customType) {
+      this.resolvePromises(`${message.type}/${message.customType}`, message);
+    }
+    if (this.clients[clientId]) {
+      this.resolveClientPromise(clientId, 'message', message);
+      this.resolveClientPromise(clientId, message.type, message);
+      if (message.type === MESSAGE_TYPES.DATA && message.customType) {
+        this.resolveClientPromise(clientId, `${message.type}/${message.customType}`, message);
+      }
+    }
 
     switch (message.type) {
       case MESSAGE_TYPES.OPEN:
@@ -452,17 +485,13 @@ class Server {
         break;
       case MESSAGE_TYPES.CLIENT_INFO:
         this.clients[clientId].info = message.data;
-        document.getElementById('clients').innerHTML = JSON.stringify(this.clients,false, 2);
+        
         break;
     }
   }
 
   onMessage(clientId) {
     return (evt) => {
-
-      log('message', 'incoming message from ' + clientId, JSON.parse(evt.data));
-
-
       const message = JSON.parse(evt.data);
 
       // Handle to who is message meant to
@@ -474,16 +503,16 @@ class Server {
         }
         else if (to === TYPE.BROADCAST) {
           this.processMessage(message, clientId);
-          this.send(message.type, message.data, to, clientId);
+          this._send(message.type, message.data, to, clientId);
         } else {
-          this.send(message.type, message.data, to, clientId);
+          this._send(message.type, message.data, to, clientId);
         }
       } else if (typeof(to) === 'object') {
         if (to.includes(TYPE.SERVER)) {
           this.processMessage(message, clientId);
-          this.send(message.type, message.data, to, clientId);
+          this._send(message.type, message.data, to, clientId);
         } else {
-          this.send(message.type, message.data, to, clientId);
+          this._send(message.type, message.data, to, clientId);
         }
       }
     };
@@ -525,7 +554,7 @@ class Server {
     this.room = this.signalling.room;
     this.id = this.signalling.id;
 
-    resolvePromises(this.promises, 'initialization', this.room);
+    this.resolvePromises('initialization', this.room);
     while (this.activeClients < this.maxConnections) {
       log('initialization', 'waiting for initial request message');
       const initialMessage = await this.signalling.message('request');
@@ -559,8 +588,7 @@ class Server {
       this.signalling.send('response', answer, id);
       log('peer connection', 'sent response');
 
-
-      this.message(id, TYPE.CLIENT_INFO)
+      this._receive(id, TYPE.CLIENT_INFO)
         .then((infoMessage) => {
           console.log('received info message');
           this.clients[id].info = infoMessage.data;
@@ -568,24 +596,25 @@ class Server {
         });
       await this.newClient();
       
-      this.send(MESSAGE_TYPES.NETWORK_INFO, {
+      this._send(MESSAGE_TYPES.NETWORK_INFO, {
         clients: pickBy(this.clientsInfo, (client, clientId) => {
           return clientId !== id;
         }),
       }, id);
 
-      this.send(MESSAGE_TYPES.NEW_CONNECTION, {
+      this._send(MESSAGE_TYPES.NEW_CONNECTION, {
         id,
       }, TYPE.BROADCAST, id);
     }
   }
 
 
-  send(type, data, to, from = TYPE.SERVER) {
+  _send(type, data, to, from = TYPE.SERVER, customType) {
     const message = {
       type,
       data,
       from,
+      customType,
     };
     const serializedMessage = JSON.stringify(message);
     if (typeof to === 'object') {
@@ -606,18 +635,25 @@ class Server {
     }
   }
 
-  // message(id, type) {
-  //   type = type || TYPE.DATA;
-  //   return new Promise((resolve, reject) => {
-  //     const evtListener = this.clients[id].receiveChannel.addEventListener('message', (evt) => {
-  //       const message = JSON.parse(evt.data);
-  //       if (message.type === type) {
-  //         resolve(message.data);
-  //         this.clients[id].receiveChannel.removeEventListener('message', evtListener);
-  //       }
-  //     })
-  //   });
-  // }
+  send(data, to, customType) {
+    this._send(MESSAGE_TYPES.DATA, data, to, TYPE.SERVER, customType);
+  }
+
+  _receive(from, type) {
+    if (from) {
+      return this.addClientPromise(from, type);
+    } else {
+      return this.addPromise(type);
+    }
+  }
+
+  receive(from, customType) {
+    if (customType) {
+      return this._receive(from, `${MESSAGE_TYPES.DATA}/${customType}`)
+    } else {
+      return this._receive(from, MESSAGE_TYPES.DATA)
+    }
+  }
 }
 
 // if (location.hash === '#s') {
