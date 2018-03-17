@@ -1,19 +1,26 @@
 survey:
   - 
     type: yes-no
-    title: Is this working ?
+    title: Is this example ?
   -
     type: checkbox
-    title: Which one of theese do you have home ?
+    title: Which issues with the library you think i had ?
     options:
-      - anxiety
-      - self hatred
-      - father who beats you
+      - complicated server
+      - procrastination
+      - unclean code
+      - bad variable names
+      - not so good communication     
   -
     type: number
-    title: How many self inflicted scars do you have ?
-    min: 4
-    max: 20
+    title: How many hours should have been spent on this project
+    min: 0
+    max: 500
   -
     type: input
-    title: How do you call your gf during intercourse ?
+    title: What is this projects name ?
+  -
+    title: What grade should it get ? (1-5)
+    type: number
+    min: 1
+    max: 2
