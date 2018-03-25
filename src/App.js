@@ -7,28 +7,7 @@ import Client from './containers/client/Client.jsx';
 import Survey from './components/survey/index.jsx';
 import yaml from 'js-yaml';
 
-const config = yaml.load(`
-survey:
-  - 
-    type: yes-no
-    title: Is this working ?
-  -
-    type: checkbox
-    title: Which one of theese do you have home ?
-    options:
-      - anxiety
-      - self hatred
-      - father who beats you
-  -
-    type: number
-    title: How many self inflicted scars do you have ?
-    min: 4
-    max: 20
-  -
-    type: input
-    title: How do you call your gf during intercourse ?`)
-
-const signallingServer = 'ws://192.168.1.10:8002/';
+const signallingServer = 'ws://localhost:8002/';
 const iceServers = {
   iceServers: [
     {
@@ -65,12 +44,24 @@ class App extends Component {
 
   render() {
     return (
-      <div className="App">
+      <div className="App centered">
+        <h1>Opeteh library example</h1>
         {!this.state.type ?
           <div>
-            <span>Choose your side</span>
-            <button onClick={this.isServer}>Server</button>
-            <button onClick={this.isClient}>Client</button>
+            <div>
+              <div>If you want to host survey choose server. If you want to connect to existing survey choose client</div>
+              <button className={"btn btn-primary"} onClick={this.isServer}>Server</button>
+              <button className={"btn btn-primary"} onClick={this.isClient}>Client</button>
+            </div>
+            <div>
+              <div>
+                server must have survey config file, if you dont have one but still want to test it download 
+                <a href="/survey-01.yml" download={"survey.yml"}> this file</a>
+              </div>
+              <div>
+                if you want to create your own survey you can find info how to do so <a href="https://github.com/jakubzika/opeteh-example/blob/master/README.md">here</a>
+              </div>
+            </div>
           </div> : null}
         {this.state.type === 'client' ?
           <div>

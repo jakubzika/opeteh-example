@@ -31,6 +31,7 @@
     "js-yaml": "^3.11.0",
     "lodash": "^4.17.5",
     "object-assign": "4.1.1",
+    "opeteh": "git+https://github.com/jakubzika/opeteh.git",
     "postcss-flexbugs-fixes": "3.2.0",
     "postcss-loader": "2.0.8",
     "promise": "8.0.1",

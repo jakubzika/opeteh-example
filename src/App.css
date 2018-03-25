@@ -26,3 +26,14 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+.centered {
+  margin-top: 10%;
+}
+
+.btn {
+  margin: 20px;
+  font-size: 1.3em;
+  padding: 15px;
+  padding-bottom: 30px;
+}
