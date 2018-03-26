@@ -2,9 +2,10 @@ import React, { Component } from 'react';
 import { map, mapValues } from 'lodash';
 import yaml from 'js-yaml';
 
-import Opeteh from '../../vendor/opeteh.es.js';
+import opeteh from 'opeteh'
 import Answers from '../../components/answers/index.jsx';
 
+console.log(opeteh)
 class Server extends Component {
   constructor(props) {
     super(props);
@@ -18,8 +19,8 @@ class Server extends Component {
     };
 
 
-    console.log(Opeteh);
-    this.server = new Opeteh.OpetehServer(props.signallingServer, props.iceServers, 8);
+    console.log();
+    this.server = new opeteh.Server(props.signallingServer, props.iceServers, 8);
     this.server.listen();
     this.server.initialization()
       .then(async (room) => {
@@ -69,13 +70,17 @@ class Server extends Component {
   }
 
   showClients() {
-    return map(this.state.clients, (client) => {
-      return (
-        <div>
-          {client.info.name}
-        </div>
-      )
-    })
+    if (Object.keys(this.state.clients).length) {
+      return map(this.state.clients, (client) => {
+        return (
+          <li>
+            {client.info.name}
+          </li>
+        )
+      })
+    } else {
+      return 'none'
+    }
   }
 
   fileInputChange(evt) {
@@ -118,13 +123,16 @@ class Server extends Component {
     window.clients = this.state.clients
     return (
       <div className="Server">
-        <h1>Server</h1>
         {!this.state.started ?
           <div>
-            <div>{this.state.room}</div>
+            <div>
+              <div><b>{this.state.room}</b></div>
+              Give this room name to others who want to connect to your survey
+            </div>
+            <br />
             {!this.state.survey ?
               <div>
-                <span>Choose survey configuration</span >
+                <span>Choose survey configuration</span>
                 <br />
                 <input
                   type="file"
@@ -134,13 +142,16 @@ class Server extends Component {
                 />
               </div>
               : null}
+              <br/>
+              <div>Wait for at least one client to join in before starting the survey</div>
             <div>
-              <h2>
+              <br />
+              <h3>
                 Connected clients
-            </h2>
-              <div>
+              </h3>
+              <ul>
                 {this.showClients()}
-              </div>
+              </ul>
               {this.state.survey && Object.keys(this.state.clients).length > 0 ?
                 <div>
                   <button onClick={this.onStart}>
@@ -150,13 +161,13 @@ class Server extends Component {
                 : null}
             </div>
           </div>
-          : 
+          :
           <div>
             started collecting data
             <Answers answers={this.state.answers} survey={this.state.survey} clientNames={this.clientNames} />
           </div>
-          }
-          
+        }
+
       </div>
     );
   }

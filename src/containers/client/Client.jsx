@@ -1,8 +1,8 @@
 import React, { Component } from 'react';
 
-import Opeteh from '../../vendor/opeteh.es.js'
+import opeteh from 'opeteh'
 import Survey from '../../components/survey/index.jsx';
-
+console.log(opeteh)
 class Client extends Component {
   constructor(props) {
     super(props);
@@ -17,7 +17,7 @@ class Client extends Component {
     this.connect = this.connect.bind(this);
     this.answersChanged = this.answersChanged.bind(this);
 
-    this.client = new Opeteh.OpetehClient(props.signallingServer, props.iceServers);
+    this.client = new opeteh.Client(props.signallingServer, props.iceServers);
   }
 
   inputValueChange(type, evt) {
@@ -60,9 +60,9 @@ class Client extends Component {
   render() {
     return (
       <div className="Client">
-        <h1>Client</h1>
         {!this.state.connected ?
         <div>
+          <div>Obtain room name and put it in room input</div>
           <div>
             <label>room</label>
             <input
@@ -70,7 +70,9 @@ class Client extends Component {
             onChange={(evt) => {this.inputValueChange('room', evt)}}
             />
           </div>
+          <br/>
           <div>
+            <div>Type in your own name</div>
             <label>name</label>
             <input
             type="text"
@@ -78,9 +80,14 @@ class Client extends Component {
             />
           </div>
           <button onClick={this.connect}>Connect!</button>
-        </div> : null}
+        </div> : 
+        <div>
+          Connected, waiting for the survey to start
+        </div>
+      }
+        
         {this.state.connected && this.state.survey ? <div>
-          Connected
+          
         </div>: null}
         {this.state.survey ?
         <div>
