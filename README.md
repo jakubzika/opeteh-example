@@ -1,4 +1,5 @@
 # Opeteh example
+> version 1.0.1
 
 Example of opeteh library functionality
 
